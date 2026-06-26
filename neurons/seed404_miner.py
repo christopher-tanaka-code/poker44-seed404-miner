@@ -76,15 +76,17 @@ def build_runtime_config():
     blacklist = _ensure_ns(cfg, "blacklist")
     logging_cfg = _ensure_ns(cfg, "logging")
 
-    _default(wallet, "name", os.getenv("POKER44_WALLET_NAME", "chris-11"))
-    _default(wallet, "hotkey", os.getenv("POKER44_HOTKEY_NAME", "default"))
-    _default(wallet, "path", os.getenv("POKER44_WALLET_PATH", os.path.expanduser("~/.bittensor/wallets")))
+    # Force runtime values from env. Miner.config() may already contain
+    # wallet.name="default" / wallet.hotkey="default", so default-only assignment
+    # is not enough here.
+    wallet.name = os.getenv("POKER44_WALLET_NAME", "chris-11")
+    wallet.hotkey = os.getenv("POKER44_HOTKEY_NAME", "default")
+    wallet.path = os.getenv("POKER44_WALLET_PATH", os.path.expanduser("~/.bittensor/wallets"))
 
-    _default(subtensor, "network", os.getenv("POKER44_SUBTENSOR_NETWORK", "finney"))
-    _default(axon, "port", int(os.getenv("POKER44_AXON_PORT", "8091")))
+    subtensor.network = os.getenv("POKER44_SUBTENSOR_NETWORK", "finney")
+    axon.port = int(os.getenv("POKER44_AXON_PORT", "8091"))
 
-    if getattr(cfg, "netuid", None) is None:
-        cfg.netuid = int(os.getenv("POKER44_NETUID", "126"))
+    cfg.netuid = int(os.getenv("POKER44_NETUID", "126"))
 
     _default(neuron, "name", os.getenv("POKER44_NEURON_NAME", "poker44_topminer"))
     _default(neuron, "device", os.getenv("POKER44_DEVICE", "cpu"))
