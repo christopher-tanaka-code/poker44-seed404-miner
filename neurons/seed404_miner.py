@@ -61,6 +61,7 @@ def _default(ns, name, value):
 
 
 def build_runtime_config():
+    print("[debug] building runtime config", flush=True)
     """
     Compatibility layer for newer Bittensor config objects where nested
     namespaces like config.neuron/config.blacklist may be None.
@@ -117,7 +118,10 @@ class Miner(BaseMinerNeuron):
     """
 
     def __init__(self, config=None):
+        print("[debug] entering Miner.__init__", flush=True)
+        print("[debug] before BaseMinerNeuron init, this may sync subtensor/metagraph", flush=True)
         super().__init__(config=config)
+        print("[debug] after BaseMinerNeuron init", flush=True)
 
         model_path = Path(
             os.getenv(
@@ -195,6 +199,12 @@ class Miner(BaseMinerNeuron):
         bt.logging.info(f"Manifest repo={repo_url}")
         bt.logging.info(f"Manifest commit={repo_commit}")
         bt.logging.info(f"Manifest model={self.model_manifest['model_name']}")
+        print(f"[seed404] started backend={self.backend}", flush=True)
+        print(f"[seed404] repo={repo_url}", flush=True)
+        print(f"[seed404] commit={repo_commit}", flush=True)
+        print(f"[seed404] model={model_path}", flush=True)
+        print(f"[seed404] artifact_sha256={artifact_sha256}", flush=True)
+
 
     async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:
         chunks = synapse.chunks or []
@@ -249,14 +259,32 @@ class Miner(BaseMinerNeuron):
 
 
 if __name__ == "__main__":
+    print("[seed404] entering __main__", flush=True)
     cfg = build_runtime_config()
+    print(
+        f"[seed404] config wallet={cfg.wallet.name}/{cfg.wallet.hotkey} "
+        f"netuid={cfg.netuid} network={cfg.subtensor.network} "
+        f"axon_port={cfg.axon.port}",
+        flush=True,
+    )
+
     with Miner(config=cfg) as miner:
-        bt.logging.info("Seed404 miner running.")
+        print("[seed404] miner context entered", flush=True)
+        print(
+            f"[seed404] heartbeat backend={getattr(miner, 'backend', None)} "
+            f"uid={getattr(miner, 'uid', None)} "
+            f"is_running={getattr(miner, 'is_running', None)} "
+            f"thread_alive={getattr(getattr(miner, 'thread', None), 'is_alive', lambda: None)()}",
+            flush=True,
+        )
+
         while True:
-            bt.logging.info(
-                f"heartbeat backend={getattr(miner, 'backend', None)} "
+            msg = (
+                f"[seed404] heartbeat backend={getattr(miner, 'backend', None)} "
                 f"uid={getattr(miner, 'uid', None)} "
                 f"is_running={getattr(miner, 'is_running', None)} "
                 f"thread_alive={getattr(getattr(miner, 'thread', None), 'is_alive', lambda: None)()}"
             )
+            print(msg, flush=True)
+            bt.logging.info(msg)
             time.sleep(60)
