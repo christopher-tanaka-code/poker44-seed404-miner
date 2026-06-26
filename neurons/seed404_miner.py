@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Tuple
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -46,6 +47,63 @@ def git_commit(repo_root: Path) -> str:
         ).strip()
     except Exception:
         return ""
+
+
+def _ensure_ns(obj, name):
+    value = getattr(obj, name, None)
+    if value is None:
+        value = SimpleNamespace()
+        setattr(obj, name, value)
+    return value
+
+
+def _default(ns, name, value):
+    if getattr(ns, name, None) in (None, ""):
+        setattr(ns, name, value)
+
+
+def build_runtime_config():
+    """
+    Compatibility layer for newer Bittensor config objects where nested
+    namespaces like config.neuron/config.blacklist may be None.
+    """
+    cfg = Miner.config()
+
+    wallet = _ensure_ns(cfg, "wallet")
+    subtensor = _ensure_ns(cfg, "subtensor")
+    axon = _ensure_ns(cfg, "axon")
+    neuron = _ensure_ns(cfg, "neuron")
+    blacklist = _ensure_ns(cfg, "blacklist")
+    logging_cfg = _ensure_ns(cfg, "logging")
+
+    _default(wallet, "name", os.getenv("POKER44_WALLET_NAME", "chris-11"))
+    _default(wallet, "hotkey", os.getenv("POKER44_HOTKEY_NAME", "default"))
+    _default(wallet, "path", os.getenv("POKER44_WALLET_PATH", os.path.expanduser("~/.bittensor/wallets")))
+
+    _default(subtensor, "network", os.getenv("POKER44_SUBTENSOR_NETWORK", "finney"))
+    _default(axon, "port", int(os.getenv("POKER44_AXON_PORT", "8091")))
+
+    if getattr(cfg, "netuid", None) is None:
+        cfg.netuid = int(os.getenv("POKER44_NETUID", "126"))
+
+    _default(neuron, "name", os.getenv("POKER44_NEURON_NAME", "poker44_topminer"))
+    _default(neuron, "device", os.getenv("POKER44_DEVICE", "cpu"))
+    _default(neuron, "epoch_length", int(os.getenv("POKER44_EPOCH_LENGTH", "50")))
+    _default(neuron, "disable_set_weights", False)
+    _default(neuron, "wait_for_inclusion", True)
+    _default(neuron, "wait_for_finalization", True)
+    _default(neuron, "moving_average_alpha", 0.05)
+    _default(neuron, "num_concurrent_forwards", 1)
+    _default(neuron, "timeout", float(os.getenv("POKER44_NEURON_TIMEOUT", "60")))
+    _default(neuron, "axon_off", False)
+
+    _default(blacklist, "force_validator_permit", True)
+    _default(blacklist, "allow_non_registered", False)
+    _default(blacklist, "allowed_validator_hotkeys", [])
+
+    _default(logging_cfg, "logging_dir", os.path.expanduser("~/.bittensor/miners"))
+
+    return cfg
 
 
 class Miner(BaseMinerNeuron):
@@ -191,7 +249,8 @@ class Miner(BaseMinerNeuron):
 
 
 if __name__ == "__main__":
-    with Miner() as miner:
+    cfg = build_runtime_config()
+    with Miner(config=cfg) as miner:
         bt.logging.info("Seed404 miner running.")
         while True:
             bt.logging.info(
