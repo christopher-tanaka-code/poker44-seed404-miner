@@ -1,168 +1,229 @@
-"""Reference Poker44 miner with simple chunk-level behavioral heuristics."""
-
-# from __future__ import annotations
-
+import argparse
+import os
 import time
-from collections import Counter
 from pathlib import Path
 from typing import Tuple
 
 import bittensor as bt
 
-from poker44.base.miner import BaseMinerNeuron
+from poker44.validator.synapse import DetectionSynapse
 from poker44.utils.model_manifest import (
     build_local_model_manifest,
     evaluate_manifest_compliance,
     manifest_digest,
 )
-from poker44.validator.synapse import DetectionSynapse
+from poker44_local_runtime import LocalWindowsStackPredictor
 
 
-class Miner(BaseMinerNeuron):
-    """
-    Reference heuristic miner.
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
 
-    It aggregates simple behavior signals over each chunk and returns a bot-risk
-    score per chunk. The goal is not SOTA accuracy, but a deterministic and
-    explainable baseline that is meaningfully better than random.
-    """
+    parser.add_argument("--netuid", type=int, default=int(os.getenv("NETUID", "126")))
 
-    def __init__(self, config=None):
-        super(Miner, self).__init__(config=config)
-        bt.logging.info("🤖 Heuristic Poker44 Miner started")
-        repo_root = Path(__file__).resolve().parents[1]
+    parser.add_argument("--wallet.name", "--wallet-name", dest="wallet_name", default=os.getenv("WALLET_NAME", "chris-11"))
+    parser.add_argument("--wallet.hotkey", "--wallet-hotkey", "--hotkey", dest="wallet_hotkey", default=os.getenv("HOTKEY", "default"))
+    parser.add_argument("--wallet.path", "--wallet-path", dest="wallet_path", default=os.getenv("WALLET_PATH", "/root/.bittensor/wallets"))
+
+    parser.add_argument("--subtensor.chain_endpoint", "--chain-endpoint", dest="chain_endpoint", default=os.getenv("CHAIN_ENDPOINT", "wss://entrypoint-finney.opentensor.ai:443"))
+    parser.add_argument("--subtensor.network", "--network", dest="network", default=os.getenv("NETWORK", "finney"))
+
+    parser.add_argument("--axon.ip", "--axon-ip", dest="axon_ip", default=os.getenv("AXON_IP", "0.0.0.0"))
+    parser.add_argument("--axon.port", "--axon-port", dest="axon_port", type=int, default=int(os.getenv("AXON_PORT", "8091")))
+    parser.add_argument("--axon.external_ip", "--axon-external-ip", dest="axon_external_ip", default=os.getenv("AXON_EXTERNAL_IP", "138.201.140.119"))
+    parser.add_argument("--axon.external_port", "--axon-external-port", dest="axon_external_port", type=int, default=int(os.getenv("AXON_EXTERNAL_PORT", os.getenv("AXON_PORT", "8091"))))
+
+    parser.add_argument("--logging.debug", action="store_true", dest="logging_debug")
+    parser.add_argument(
+        "--blacklist.allowed_validator_hotkeys",
+        dest="blacklist_allowed_validator_hotkeys",
+        nargs="*",
+        default=[],
+    )
+
+    return parser
+
+
+class Miner:
+    def __init__(self):
+        self.args = build_parser().parse_args()
+
+        self.repo_root = Path(__file__).resolve().parents[1]
+        self.model_path = self.repo_root / "models" / "poker44_seed404_local_model.joblib"
+
+        expected_hotkey_path = Path(self.args.wallet_path) / self.args.wallet_name / "hotkeys" / self.args.wallet_hotkey
+        print(f"Wallet name: {self.args.wallet_name}")
+        print(f"Wallet hotkey: {self.args.wallet_hotkey}")
+        print(f"Expected hotkey path: {expected_hotkey_path}")
+
+        if not expected_hotkey_path.exists():
+            raise FileNotFoundError(
+                f"Hotkey file not found: {expected_hotkey_path}. "
+                f"Run: btcli wallet list"
+            )
+
+        print(f"Loading Poker44 model from {self.model_path}")
+        self.model = LocalWindowsStackPredictor(self.model_path)
+
+        model_meta = dict(getattr(self.model, "metadata", {}) or {})
+
         self.model_manifest = build_local_model_manifest(
-            repo_root=repo_root,
-            implementation_files=[Path(__file__).resolve()],
+            repo_root=self.repo_root,
+            implementation_files=[
+                Path(__file__).resolve(),
+                self.repo_root / "poker44_local_runtime.py",
+                self.repo_root / "build_dataset.py",
+                self.model_path,
+            ],
             defaults={
-                "model_name": "poker44-reference-heuristic",
-                "model_version": "1",
-                "framework": "python-heuristic",
-                "license": "MIT",
-                "repo_url": "https://github.com/Poker44/Poker44-subnet",
-                "notes": "Reference heuristic miner shipped with the Poker44 subnet.",
+                "schema_version": "1",
                 "open_source": True,
+                "repo_url": "https://github.com/christopher-tanaka-code/poker44-seed404-miner",
+                "model_name": model_meta.get("model_name", "poker44-seed404-supervised"),
+                "model_version": model_meta.get("model_version", "seed404-refresh"),
+                "framework": model_meta.get("framework", "scikit-learn local stack"),
+                "license": "MIT",
                 "inference_mode": "remote",
-                "training_data_statement": (
-                    "Reference heuristic miner. No training step. Uses only runtime chunk features."
+                "training_data_statement": model_meta.get(
+                    "training_data_statement",
+                    "Trained only on public Poker44 benchmark releases and miner-visible chunk fields.",
                 ),
-                "training_data_sources": ["none"],
-                "private_data_attestation": (
-                    "This reference miner does not train on validator-only evaluation data."
+                "training_data_sources": ["https://api.poker44.net/api/v1/benchmark"],
+                "private_data_attestation": model_meta.get(
+                    "private_data_attestation",
+                    "No validator-only labels, hidden live labels, non-public Poker44 production labels, or private evaluation labels were used.",
                 ),
+                "data_attestation": (
+                    "Uses only miner-visible hand/action/chunk payload fields. "
+                    "Does not use chunkId, chunkHash, sourceDate, pagination order, or hidden labels as predictive features."
+                ),
+                "artifact_url": "models/poker44_seed404_local_model.joblib",
+                "model_card_url": "MODEL_CARD.md",
+                "notes": "Minimal axon runtime with explicit wallet loading. Bypasses metagraph sync.",
             },
         )
+
         self.manifest_compliance = evaluate_manifest_compliance(self.model_manifest)
         self.manifest_digest = manifest_digest(self.model_manifest)
-        self._log_manifest_startup(repo_root)
-        
-        # # Attach handlers after initialization
-        # self.axon.attach(
-        #     forward_fn = self.forward,
-        #     blacklist_fn = self.blacklist,
-        #     priority_fn = self.priority,
-        # )
-        # bt.logging.info("Attaching forward function to miner axon.")
-        
-        bt.logging.info(f"Axon created: {self.axon}")
 
-    def _log_manifest_startup(self, repo_root: Path) -> None:
-        bt.logging.info("Open-sourced miner manifest standard active for this miner.")
-        bt.logging.info(
-            f"Miner transparency status: {self.manifest_compliance['status']} "
-            f"(missing_fields={self.manifest_compliance['missing_fields']})"
-        )
-        bt.logging.info(
-            f"Manifest summary | model={self.model_manifest.get('model_name', '')} "
-            f"version={self.model_manifest.get('model_version', '')} "
-            f"repo={self.model_manifest.get('repo_url', '')} "
-            f"commit={self.model_manifest.get('repo_commit', '')} "
-            f"open_source={self.model_manifest.get('open_source')}"
-        )
-        bt.logging.info(
-            f"Manifest digest={self.manifest_digest} "
-            f"inference_mode={self.model_manifest.get('inference_mode', '')}"
-        )
-        bt.logging.info(
-            "Miner prep docs available | "
-            f"miner_doc={repo_root / 'docs' / 'miner.md'}"
+        print(f"Manifest status: {self.manifest_compliance.get('status')}")
+        print(f"Manifest digest: {self.manifest_digest}")
+
+        print("Creating explicit Bittensor wallet...")
+        self.wallet = bt.Wallet(
+            name=self.args.wallet_name,
+            hotkey=self.args.wallet_hotkey,
+            path=self.args.wallet_path,
         )
 
-    async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:
-        """Assign one deterministic bot-risk score per chunk."""
-        chunks = synapse.chunks or []
-        scores = [self.score_chunk(chunk) for chunk in chunks]
-        synapse.risk_scores = scores
-        synapse.predictions = [s >= 0.5 for s in scores]
-        synapse.model_manifest = dict(self.model_manifest)
-        bt.logging.info(f"Miner Predctions: {synapse.predictions}")
-        bt.logging.info(f"Scored {len(chunks)} chunks with heuristic risks.")
-        return synapse
+        print("Creating subtensor...")
+        # Bittensor SDK v10 Subtensor accepts network/config/log_verbose.
+        # It does not accept chain_endpoint directly.
+        self.subtensor = bt.Subtensor(network=self.args.network)
+
+        print("Creating axon...")
+        axon_kwargs = {
+            "wallet": self.wallet,
+            "ip": self.args.axon_ip,
+            "port": self.args.axon_port,
+        }
+
+        if self.args.axon_external_ip:
+            axon_kwargs["external_ip"] = self.args.axon_external_ip
+
+        if self.args.axon_external_port:
+            axon_kwargs["external_port"] = self.args.axon_external_port
+
+        self.axon = bt.Axon(**axon_kwargs)
+
+        self.allowed_validator_hotkeys = {
+            str(h).strip()
+            for h in self.args.blacklist_allowed_validator_hotkeys
+            if str(h).strip()
+        }
+
+        self.axon.attach(
+            forward_fn=self.forward,
+            blacklist_fn=self.blacklist,
+            priority_fn=self.priority,
+        )
+
+        print(
+            f"Axon ready on {self.args.axon_ip}:{self.args.axon_port}, "
+            f"external {self.args.axon_external_ip}:{self.args.axon_external_port}"
+        )
 
     @staticmethod
     def _clamp01(value: float) -> float:
+        try:
+            value = float(value)
+        except Exception:
+            return 0.5
+        if value != value:
+            return 0.5
         return max(0.0, min(1.0, value))
 
-    @classmethod
-    def _score_hand(cls, hand: dict) -> float:
-        actions = hand.get("actions") or []
-        players = hand.get("players") or []
-        streets = hand.get("streets") or []
-        outcome = hand.get("outcome") or {}
+    async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:
+        chunks = synapse.chunks or []
 
-        action_counts = Counter(action.get("action_type") for action in actions)
-        meaningful_actions = max(
-            1,
-            sum(
-                action_counts.get(kind, 0)
-                for kind in ("call", "check", "bet", "raise", "fold")
-            ),
+        try:
+            scores = self.model.predict_chunk_scores(chunks)
+        except Exception as exc:
+            print(f"Model inference failed: {exc}")
+            scores = [0.5 for _ in chunks]
+
+        if len(scores) != len(chunks):
+            print(f"Bad score length: scores={len(scores)} chunks={len(chunks)}")
+            scores = [0.5 for _ in chunks]
+
+        scores = [round(self._clamp01(score), 6) for score in scores]
+
+        synapse.risk_scores = scores
+        synapse.predictions = [score >= 0.5 for score in scores]
+        synapse.model_manifest = dict(self.model_manifest)
+
+        print(
+            f"Scored {len(chunks)} chunks. "
+            f"min={min(scores) if scores else None} "
+            f"max={max(scores) if scores else None} "
+            f"positives={sum(s >= 0.5 for s in scores)}"
         )
 
-        call_ratio = action_counts.get("call", 0) / meaningful_actions
-        check_ratio = action_counts.get("check", 0) / meaningful_actions
-        fold_ratio = action_counts.get("fold", 0) / meaningful_actions
-        raise_ratio = action_counts.get("raise", 0) / meaningful_actions
-        street_depth = len(streets) / 3.0
-        showdown_flag = 1.0 if outcome.get("showdown") else 0.0
-
-        player_count_signal = 0.0
-        if players:
-            player_count_signal = (6 - min(len(players), 6)) / 4.0
-
-        score = 0.0
-        score += 0.32 * street_depth
-        score += 0.22 * showdown_flag
-        score += 0.18 * cls._clamp01(call_ratio / 0.35)
-        score += 0.12 * cls._clamp01(check_ratio / 0.30)
-        score += 0.08 * cls._clamp01(player_count_signal)
-        score -= 0.18 * cls._clamp01(fold_ratio / 0.55)
-        score -= 0.10 * cls._clamp01(raise_ratio / 0.20)
-
-        return cls._clamp01(score)
-
-    @classmethod
-    def score_chunk(cls, chunk: list[dict]) -> float:
-        if not chunk:
-            return 0.5
-
-        hand_scores = [cls._score_hand(hand) for hand in chunk]
-        avg_score = sum(hand_scores) / len(hand_scores)
-
-        return round(cls._clamp01(avg_score), 6)
+        return synapse
 
     async def blacklist(self, synapse: DetectionSynapse) -> Tuple[bool, str]:
-        """Determine whether to blacklist incoming requests."""
-        return self.common_blacklist(synapse)
+        hotkey = None
+        if synapse.dendrite is not None:
+            hotkey = synapse.dendrite.hotkey
+
+        if self.allowed_validator_hotkeys:
+            if hotkey in self.allowed_validator_hotkeys:
+                return False, "Allowed validator hotkey"
+            return True, "Not in validator allowlist"
+
+        return False, "Allowed because metagraph RPC is unavailable"
 
     async def priority(self, synapse: DetectionSynapse) -> float:
-        """Assign priority based on caller's stake."""
-        return self.caller_priority(synapse)
+        return 1.0
+
+    def run(self):
+        print(f"Serving axon on netuid={self.args.netuid}")
+        self.axon.serve(netuid=self.args.netuid, subtensor=self.subtensor)
+        self.axon.start()
+
+        print("Poker44 explicit-wallet supervised miner running.")
+
+        try:
+            while True:
+                try:
+                    block = self.subtensor.get_current_block()
+                except Exception as exc:
+                    block = f"unknown: {exc}"
+                print(f"Miner alive. block={block}")
+                time.sleep(300)
+        except KeyboardInterrupt:
+            self.axon.stop()
+            print("Miner stopped.")
 
 
 if __name__ == "__main__":
-    with Miner() as miner:
-        bt.logging.info("Random miner running...")
-        while True:
-            bt.logging.info(f"Miner UID: {miner.uid} | Incentive: {miner.metagraph.I[miner.uid]}")
-            time.sleep(5 * 60)
+    Miner().run()
