@@ -94,9 +94,9 @@ public leaderboard surfaces derived from signed validator and network state.
 
 At the current production cadence:
 
-- competition epochs run for `72h`, anchored at `20:00 UTC`;
-- canonical eval chunks are managed in rolling `6h` windows inside that epoch;
-- the latest fully settled competition winner remains the canonical competition reference until the next `72h` settlement closes.
+- competition epochs run for `120h`, anchored at `20:00 UTC`;
+- canonical eval chunks are managed in rolling `24h` windows inside that epoch;
+- the latest fully settled competition winner remains the canonical competition reference until the next `120h` settlement closes.
 
 Settlement behavior now follows a platform-decided pattern:
 
