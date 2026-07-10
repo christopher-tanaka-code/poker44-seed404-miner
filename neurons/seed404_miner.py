@@ -79,7 +79,10 @@ def build_runtime_config():
     # wallet.name="default" / wallet.hotkey="default", so default-only assignment
     # is not enough here.
     wallet.name = os.getenv("POKER44_WALLET_NAME", "chris-11")
-    wallet.hotkey = os.getenv("POKER44_HOTKEY_NAME", "default")
+    hotkey = os.getenv("POKER44_HOTKEY_NAME")
+    if not hotkey or hotkey == "default":
+        raise RuntimeError("POKER44_HOTKEY_NAME must be explicitly set to the real UID 145 hotkey name.")
+    wallet.hotkey = hotkey
     wallet.path = os.getenv("POKER44_WALLET_PATH", os.path.expanduser("~/.bittensor/wallets"))
 
     subtensor.network = os.getenv("POKER44_SUBTENSOR_NETWORK", "finney")
@@ -95,7 +98,7 @@ def build_runtime_config():
     _default(neuron, "wait_for_finalization", True)
     _default(neuron, "moving_average_alpha", 0.05)
     _default(neuron, "num_concurrent_forwards", 1)
-    _default(neuron, "timeout", float(os.getenv("POKER44_NEURON_TIMEOUT", "60")))
+    _default(neuron, "timeout", float(os.getenv("POKER44_NEURON_TIMEOUT", "180")))
     _default(neuron, "axon_off", False)
 
     _default(blacklist, "force_validator_permit", True)
