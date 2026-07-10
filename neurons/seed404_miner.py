@@ -87,8 +87,6 @@ def build_runtime_config():
     keyfile = Path(wallet.path).expanduser() / wallet.name / "hotkeys" / wallet.hotkey
     if not keyfile.is_file():
         raise RuntimeError(f"Hotkey file does not exist or is not a file: {keyfile}")
-    wallet.path = os.getenv("POKER44_WALLET_PATH", os.path.expanduser("~/.bittensor/wallets"))
-
     subtensor.network = os.getenv("POKER44_SUBTENSOR_NETWORK", "finney")
     axon.port = int(os.getenv("POKER44_AXON_PORT", "8091"))
 
